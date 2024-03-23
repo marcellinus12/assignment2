@@ -1,84 +1,58 @@
 package controllers
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
+	"web-server/database"
+	"web-server/models"
 
 	"github.com/gin-gonic/gin"
 )
 
-type Items struct {
-	ItemID      int    `json:"item_id"`
-	ItemCode    string `json:"item_code"`
-	Description string `json:"description"`
-	Quantity    int    `json:"quantity"`
-	OrderID     int    `json:"order_id"`
-}
-
-type Order struct {
-	OrderID      int     `json:"order_id"`
-	CustomerName string  `json:"customer_name"`
-	OrderedAt    string  `json:"ordered_at"`
-	Items        []Items `json:"items"`
-}
-
-var OrderData = []Order{}
-
-// func validation(order Order) error {
-
-// }
-
 func GetOrder(ctx *gin.Context) {
+	db := database.GetDB()
 	orderIDStr := ctx.Param("orderID")
-	orderID, err2 := strconv.Atoi(orderIDStr)
-	if err2 != nil {
-		ctx.AbortWithError(http.StatusBadRequest, err2)
+	orderID, err := strconv.Atoi(orderIDStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Bad Request",
+			"message": err.Error(),
+		})
 		return
 	}
 
-	condition := false
-
-	var getOrder Order
-
-	for _, order := range OrderData {
-		if orderID == order.OrderID {
-			condition = true
-
-			getOrder = order
-			break
-		}
-	}
-
-	if !condition {
-		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-			"error_status":  "Data not found",
-			"error_message": fmt.Sprintf("order with id %v not found", orderID),
+	var order models.Order
+	if err := db.Preload("Item").First(&order, orderID).Error; err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"error":   "Not Found",
+			"message": "Order not found",
 		})
-
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"order": getOrder,
+		"order": order,
 	})
 }
 
 func CreateOrder(ctx *gin.Context) {
-	var newOrder Order
-
-	err := ctx.ShouldBindJSON(&newOrder)
-	if err != nil {
-		ctx.AbortWithError(http.StatusBadRequest, err)
+	db := database.GetDB()
+	var newOrder models.Order
+	if err := ctx.ShouldBindJSON(&newOrder); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Bad Request",
+			"message": err.Error(),
+		})
 		return
 	}
 
-	for i := range newOrder.Items {
-		newOrder.Items[i].OrderID = len(OrderData) + 1
+	if err := db.Create(&newOrder).Error; err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Bad Request",
+			"message": err.Error(),
+		})
+		return
 	}
-
-	newOrder.OrderID = len(OrderData) + 1
-	OrderData = append(OrderData, newOrder)
 
 	ctx.JSON(http.StatusCreated, gin.H{
 		"order": newOrder,
@@ -86,81 +60,71 @@ func CreateOrder(ctx *gin.Context) {
 }
 
 func UpdateOrder(ctx *gin.Context) {
+	db := database.GetDB()
 	orderIDStr := ctx.Param("orderID")
-	orderID, err2 := strconv.Atoi(orderIDStr)
-	if err2 != nil {
-		ctx.AbortWithError(http.StatusBadRequest, err2)
+	orderID, err := strconv.Atoi(orderIDStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Bad Request",
+			"message": err.Error(),
+		})
 		return
 	}
 
-	condition := false
-
-	var updatedOrder Order
-
-	err := ctx.ShouldBindJSON(&updatedOrder)
-	if err != nil {
-		ctx.AbortWithError(http.StatusBadRequest, err)
-	}
-
-	for i, order := range OrderData {
-		if orderID == order.OrderID {
-			condition = true
-
-			OrderData[i] = updatedOrder
-			OrderData[i].OrderID = orderID
-			break
-		}
-	}
-
-	if !condition {
-		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-			"error_status":  "Data not found",
-			"error_message": fmt.Sprintf("order with id %v not found", orderID),
+	var updatedOrder models.Order
+	if err := ctx.ShouldBindJSON(&updatedOrder); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Bad Request",
+			"message": err.Error(),
 		})
+		return
+	}
 
+	updatedOrder.ID = orderID
+
+	if err := db.Save(&updatedOrder).Error; err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Bad Request",
+			"message": err.Error(),
+		})
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"meesage": fmt.Sprintf("order with id %v has been successfully updated", orderID),
+		"message": "Order updated successfully",
+		"order":   updatedOrder,
 	})
 }
 
 func DeleteOrder(ctx *gin.Context) {
+	db := database.GetDB()
 	orderIDStr := ctx.Param("orderID")
-	orderID, err2 := strconv.Atoi(orderIDStr)
-	if err2 != nil {
-		ctx.AbortWithError(http.StatusBadRequest, err2)
-		return
-	}
-
-	condition := false
-
-	var orderIndex int
-
-	for i, order := range OrderData {
-		if orderID == order.OrderID {
-			condition = true
-
-			orderIndex = i
-			break
-		}
-	}
-
-	if !condition {
-		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-			"error_status":  "Data not found",
-			"error_message": fmt.Sprintf("order with id %v not found", orderID),
+	orderID, err := strconv.Atoi(orderIDStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Bad Request",
+			"message": err.Error(),
 		})
-
 		return
 	}
 
-	copy(OrderData[orderIndex:], OrderData[orderIndex+1:])
-	OrderData[orderID-1] = Order{}
-	OrderData = OrderData[:len(OrderData)-1]
+	if err := db.Where("order_id = ?", orderID).Delete(&models.Item{}).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Internal Server Error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	if err := db.Delete(&models.Order{}, orderID).Error; err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Internal Server Error",
+			"message": err.Error(),
+		})
+		return
+	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"meesage": fmt.Sprintf("order with id %v has been successfully deleted", orderID),
+		"message": "Order deleted successfully",
 	})
 }
